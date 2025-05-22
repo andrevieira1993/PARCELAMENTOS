@@ -14,7 +14,7 @@
       color: #27ae60;
       text-align: center;
     }
-    select {
+    select, button {
       padding: 10px;
       font-size: 16px;
       border-radius: 10px;
@@ -42,11 +42,6 @@
       box-shadow: 0 0 10px #000;
       border: 2px solid #444;
       text-align: center;
-      transition: 0.3s ease-in-out;
-    }
-    .card:hover {
-      transform: scale(1.05);
-      box-shadow: 0 0 20px #27ae60;
     }
     table {
       width: 100%;
@@ -64,24 +59,7 @@
     td {
       background-color: #1c1c1c;
     }
-    #gerarPdfBtn {
-      background-color: #27ae60;
-      border: none;
-      padding: 12px 24px;
-      font-size: 16px;
-      color: white;
-      border-radius: 10px;
-      cursor: pointer;
-      margin-bottom: 20px;
-      transition: background-color 0.3s ease;
-    }
-    #gerarPdfBtn:hover {
-      background-color: #219150;
-    }
   </style>
-  <!-- jsPDF e autoTable CDN -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
 </head>
 <body>
   <h1>Consulta de Parcelamentos</h1>
@@ -118,10 +96,9 @@
       <option value="11">Novembro</option>
       <option value="12">Dezembro</option>
     </select>
+    <button onclick="exportarPDF()">Exportar PDF</button>
+    <button onclick="exportarExcel()">Exportar Excel</button>
   </div>
-
-  <!-- Botão para gerar PDF -->
-  <button id="gerarPdfBtn">Gerar PDF</button>
 
   <div class="card-container">
     <div class="card" id="totalParcelado">Total Parcelado: R$ 0,00</div>
@@ -129,7 +106,8 @@
     <div class="card" id="totalMes">Total do Mês: R$ 0,00</div>
     <div class="card" id="totalPago">Total Pago: R$ 0,00</div>
   </div>
-  <table>
+
+  <table id="tabelaParcelas">
     <thead>
       <tr>
         <th>Empresa</th>
@@ -149,14 +127,17 @@
     <tbody id="tabelaBody"></tbody>
   </table>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script>
     let dados = [];
+
     function processarDados(data) {
       dados = data;
       preencherAnos(data);
-      renderizarTabela();
-      calcularTotais(data);
+      aplicarFiltros();
     }
+
     function preencherAnos(lista) {
       const anos = new Set();
       lista.forEach(item => {
@@ -171,29 +152,46 @@
         anoSelect.appendChild(opt);
       });
     }
-    function renderizarTabela() {
+
+    function aplicarFiltros() {
       const empresaFiltro = document.getElementById('empresaSelect').value.toLowerCase();
       const situacaoFiltro = document.getElementById('situacaoSelect').value.toLowerCase();
       const anoFiltro = document.getElementById('anoSelect').value;
       const mesFiltro = document.getElementById('mesSelect').value;
+
       const tbody = document.getElementById('tabelaBody');
       tbody.innerHTML = '';
+      let totalParcelado = 0;
+      let totalAno = 0;
+      let totalMes = 0;
+      let totalPago = 0;
       const hoje = new Date();
+
       dados.forEach(item => {
         const empresa = item.Empresa?.toLowerCase() || '';
         const situacao = (item.situação || '').toLowerCase();
-        let data = new Date(item['data de vencimento']);
+        const data = new Date(item['data de vencimento']);
+        if (isNaN(data)) return;
         const ano = data.getFullYear();
         const mes = data.getMonth() + 1;
-        const dataFormatada = `${String(data.getDate()).padStart(2, '0')}/${String(mes).padStart(2, '0')}/${ano}`;
+        const valor = parseFloat(item['vlr toral']) || 0;
+
         const passaFiltro =
           (empresaFiltro === 'todos' || empresa === empresaFiltro) &&
           (situacaoFiltro === 'todos' || situacao === situacaoFiltro) &&
           (anoFiltro === 'todos' || ano == anoFiltro) &&
           (mesFiltro === 'todos' || mes == mesFiltro);
+
         if (passaFiltro) {
+          totalParcelado += valor;
+          if (anoFiltro === 'todos' || ano == anoFiltro) totalAno += valor;
+          if (mesFiltro === 'todos' || mes == mesFiltro) totalMes += valor;
+          if (situacao === 'pago') totalPago += valor;
+
+          const dataFormatada = `${String(data.getDate()).padStart(2, '0')}/${String(mes).padStart(2, '0')}/${ano}`;
           const dias = Math.floor((data - hoje) / (1000 * 60 * 60 * 24));
           const corDias = dias < 0 ? '#e74c3c' : '#2ecc71';
+
           const linha = `
             <tr>
               <td>${item.Empresa}</td>
@@ -204,81 +202,23 @@
               <td>R$ ${parseFloat(item['valor orig']).toFixed(2)}</td>
               <td>R$ ${parseFloat(item.juros).toFixed(2)}</td>
               <td>R$ ${parseFloat(item.multa).toFixed(2)}</td>
-              <td>R$ ${parseFloat(item['vlr toral']).toFixed(2)}</td>
+              <td>R$ ${valor.toFixed(2)}</td>
               <td>${dataFormatada}</td>
               <td>${item.situação}</td>
               <td style="color: ${corDias}; font-weight: bold;">${dias} dia${Math.abs(dias) !== 1 ? 's' : ''}</td>
-            </tr>
-          `;
+            </tr>`;
           tbody.insertAdjacentHTML('beforeend', linha);
         }
       });
-    }
-    function calcularTotais(lista) {
-      const hoje = new Date();
-      const anoAtual = hoje.getFullYear();
-      const mesAtual = hoje.getMonth() + 1;
-      let totalParcelado = 0;
-      let totalAno = 0;
-      let totalMes = 0;
-      let totalPago = 0;
-      lista.forEach(item => {
-        const valor = parseFloat(item['vlr toral']) || 0;
-        const situacao = (item['situação'] || '').toLowerCase();
-        const data = new Date(item['data de vencimento']);
-        if (!isNaN(data)) {
-          totalParcelado += valor;
-          if (data.getFullYear() === anoAtual) {
-            totalAno += valor;
-            if (data.getMonth() + 1 === mesAtual) {
-              totalMes += valor;
-            }
-          }
-        }
-        if (situacao === 'pago') {
-          totalPago += valor;
-        }
-      });
+
       document.getElementById('totalParcelado').textContent = `Total Parcelado: R$ ${totalParcelado.toFixed(2)}`;
       document.getElementById('totalAno').textContent = `Total do Ano: R$ ${totalAno.toFixed(2)}`;
       document.getElementById('totalMes').textContent = `Total do Mês: R$ ${totalMes.toFixed(2)}`;
       document.getElementById('totalPago').textContent = `Total Pago: R$ ${totalPago.toFixed(2)}`;
     }
+
     document.querySelectorAll('select').forEach(select => {
-      select.addEventListener('change', () => {
-        renderizarTabela();
-        calcularTotais(dados);
-      });
-    });
-
-    // Função para gerar PDF da tabela já filtrada
-    document.getElementById('gerarPdfBtn').addEventListener('click', () => {
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF();
-
-      // Captura os headers da tabela
-      const headers = [];
-      document.querySelectorAll('table thead th').forEach(th => headers.push(th.innerText));
-
-      // Captura os dados visíveis da tabela (linhas filtradas)
-      const data = [];
-      document.querySelectorAll('#tabelaBody tr').forEach(tr => {
-        const row = [];
-        tr.querySelectorAll('td').forEach(td => row.push(td.innerText));
-        data.push(row);
-      });
-
-      doc.text('Relatório de Parcelamentos Filtrados', 14, 15);
-
-      doc.autoTable({
-        head: [headers],
-        body: data,
-        startY: 20,
-        styles: { fontSize: 8 },
-        headStyles: { fillColor: [231, 76, 60] }
-      });
-
-      doc.save('relatorio_parcelamentos.pdf');
+      select.addEventListener('change', aplicarFiltros);
     });
 
     function carregarJSONP(callback) {
@@ -288,6 +228,23 @@
     }
 
     carregarJSONP(processarDados);
+
+    function exportarExcel() {
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.table_to_sheet(document.getElementById('tabelaParcelas'));
+      XLSX.utils.book_append_sheet(wb, ws, "Parcelamentos");
+      XLSX.writeFile(wb, "parcelamentos.xlsx");
+    }
+
+    async function exportarPDF() {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation: "landscape" });
+      doc.text("Relatório de Parcelamentos", 14, 10);
+      const tabela = document.getElementById('tabelaParcelas');
+      doc.autoTable({ html: tabela, startY: 15 });
+      doc.save("parcelamentos.pdf");
+    }
   </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
 </body>
 </html>
